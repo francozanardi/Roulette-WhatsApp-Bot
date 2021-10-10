@@ -1,5 +1,6 @@
 
 const admin = require("firebase-admin");
+const axios = require('axios').default;
 
 const serviceAccount = require("./dbKey.json");
 
@@ -9,6 +10,8 @@ admin.initializeApp({
 });
 
 const db = admin.database();
+const bucket = admin.storage().bucket("gs://roulette-12812.appspot.com");
+const apiSchemeAndDomain = "https://ruletas.web.app"; //"http://localhost:5000";
 
 const comandos = {
     help: "help",
@@ -18,46 +21,68 @@ const comandos = {
     listarItems: "ver",
     agregarItem: "agregar",
     eliminarItem: "eliminar",
-    girarRuleta: "girar"
+    info: "info",
+    girarAutomatico: "girar",
+    girarManual: "girar.manual"
 }
 
 
-const commandRegexp =  /^\! ?(?<name>[\w\.]+) *(?<args>[\wÁÉÍÓÚÑáéíóúñ\d ,\.;]+)?$/;
+const commandRegexp =  /^\! ?(?<name>[\w\.]+) *(?<args>[\wÁÉÍÓÚÑáéíóúñ\d ,\.;'":]+)?$/;
 
-module.exports.run = function(){
-    client.on('message', async message => {
-        console.log("from: " + message.from);
 
-        if(message.from.split('@')[0] != '5492920303450' || !isCommand(message.body)){
-            return;
-        }
+module.exports.newQuotedTextMessage  = (async message => {
+    if(!isCommand(message.body)){
+        return;
+    }
 
-        var command = getCommandNameWithArgs(message.body);
-        console.log('command: ', command);
+    var command = getCommandNameWithArgs(message.body);
+    console.log('command: ', command);
+    console.log('quoted: ', message.quoted);
 
-        if(command.name === 'ping') {
-            message.reply('pong');
-        } else if(command.name === comandos.help){
-            message.reply(getHelpMessage());
-        } else if(command.name === comandos.listarRuletas){
-            message.reply(await getRuletas());
-        } else if(command.name === comandos.agregarRuleta && command.args[0] != ''){
-            message.reply(await addRuleta(command.args[0]));
-        } else if(command.name === comandos.eliminarRuleta && command.args[0] != ''){
-            message.reply(await removeRuleta(command.args[0]));
-        } else if(command.name === comandos.listarItems && command.args[0] != ''){
-            message.reply(await getItemsOfRuleta(command.args[0]));
-        } else if(command.name === comandos.agregarItem && command.args[0] != '' && command.args[1] != ''){
-            message.reply(await addItemInRuleta(command.args[0], command.args[1]));
-        } else if(command.name === comandos.eliminarItem && command.args[0] != '' && command.args[1] != ''){
-            message.reply(await removeItemInRuleta(command.args[0], command.args[1]));
-        } else if(command.name === comandos.girarRuleta && command.args[0] != ''){
-            message.reply(await girarRuleta(command.args[0]));
-        } else {
-            message.reply("Comando no reconocido");
-        }
-    });
+    if(command.name === 'burlar') {
+        message.reply(burlar(message.quoted));
+    } else {
+        message.reply("Comando no reconocido");
+    }
+});
+
+
+function burlar(msg){
+    return msg.replace(/[aeiouáéíóúAEIOUÁÉÍÓÚ]/gmi, "i");
 }
+
+module.exports.newTextMessage = (async message => {
+    if(!isCommand(message.body)){
+        return;
+    }
+
+    var command = getCommandNameWithArgs(message.body);
+    console.log('command: ', command);
+
+    if(command.name === 'ping') {
+        message.reply('pong');
+    } else if(command.name === comandos.help){
+        message.reply(getHelpMessage());
+    } else if(command.name === comandos.listarRuletas){
+        message.reply(await getRuletas());
+    } else if(command.name === comandos.agregarRuleta && command.args[0] != ''){
+        message.reply(await addRuleta(command.args[0]));
+    } else if(command.name === comandos.eliminarRuleta && command.args[0] != ''){
+        message.reply(await removeRuleta(command.args[0]));
+    } else if(command.name === comandos.listarItems && command.args[0] != ''){
+        message.reply(await getItemsOfRuleta(command.args[0]));
+    } else if(command.name === comandos.agregarItem && command.args[0] != '' && command.args[1] != ''){
+        message.reply(await addItemInRuleta(command.args[0], command.args[1]));
+    } else if(command.name === comandos.eliminarItem && command.args[0] != '' && command.args[1] != ''){
+        message.reply(await removeItemInRuleta(command.args[0], command.args[1]));
+    } else if(command.name === comandos.girarManual && command.args[0] != ''){
+        message.reply(await girarManualRuleta(command.args[0]));
+    } else if(command.name === comandos.girarAutomatico && command.args[0] != ''){
+        message.replyVideo(await girarAutomaticoRuleta(command.args[0]));
+    } else {
+        message.reply("Comando no reconocido");
+    }
+});
 
 function isCommand(msg){
     return commandRegexp.test(msg);
@@ -88,7 +113,9 @@ function getHelpMessage(){
             "* *!" + comandos.listarItems + " _ruleta_*: Muesta todos los items y sus ids de la ruleta _ruleta_.\n" +
             "* *!" + comandos.agregarItem + " _ruleta_ ; _item_*: Agrega el item _item_ a la ruleta _ruleta_.\n" +
             "* *!" + comandos.eliminarItem + " _ruleta_ ; _item_*: Elimina el item _item_ de la ruleta _ruleta_.\n" +
-            "* *!" + comandos.girarRuleta + " _ruleta_*: Muestra un enlace para girar la ruleta _ruleta_.\n\n\n" +
+            "* ~*!" + comandos.info + " _ruleta_ ; _item_*: Ver información de la película/serie _item_ de la ruleta _ruleta_.~\n" +
+            "* *!" + comandos.girarAutomatico + " _ruleta_*: Envía un vídeo de la ruleta _ruleta_ girándose.\n" +
+            "* *!" + comandos.girarManual + " _ruleta_*: Muestra un enlace para girar la ruleta _ruleta_.\n\n\n" +
             "*Importante*: Al momento de especificar un _item_ o una _ruleta_ se puede poner tanto su id como su nombre."
 }
 
@@ -266,10 +293,8 @@ function searchItemInRuleta(ruleta, item){
     return null;
 }
 
-
-async function girarRuleta(ruleta){
+async function getLinkToTurnRoulette(ruleta){
     var ruletaFound = await searchRuleta(ruleta);
-    var link;
     var itemsList = "";
 
     if(ruletaFound && ruletaFound.items){
@@ -279,9 +304,40 @@ async function girarRuleta(ruleta){
 
         itemsList = itemsList.substr(0, itemsList.length-1).replace(/ /g, "%20");
 
-        link = "https://ruletas.web.app/girar?ruleta=" + ruletaFound.name + "&items=" + itemsList
+        return apiSchemeAndDomain + "/girar?ruleta=" + ruletaFound.name + "&items=" + itemsList
+    } else {
+        return null;
+    }
+}
+
+
+async function girarManualRuleta(ruleta){
+    var link = await getLinkToTurnRoulette(ruleta);
+
+    if(link){
         return "Para girar la ruleta ingrese aquí: " + link;
     } else {
         return "La ruleta \"" + ruleta + "\" no ha sido encontrada o no tiene items.";
     }
 }
+
+
+async function girarAutomaticoRuleta(ruleta){
+    var link = await getLinkToTurnRoulette(ruleta);
+
+    if(link){
+        var resp = await axios.post(apiSchemeAndDomain + '/getvideo', {
+            key: 'wspBot11131719',
+            source: link
+        });
+
+        console.log('resp.data: ', resp.data);
+        var file = bucket.file(resp.data);
+        var fileDownloaded = await file.download();
+
+        return fileDownloaded[0];
+    } else {
+        return null;
+    }
+}
+

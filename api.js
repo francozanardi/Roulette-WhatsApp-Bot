@@ -1,50 +1,88 @@
-const qrcode = require('qrcode-terminal');
-const { Client } = require('whatsapp-web.js');
 const fs = require('fs');
+const { WAConnection, MessageType, Mimetype } = require('@adiwajshing/baileys');
 
 const SESSION_FILE_PATH = './session.json';
 
-let sessionCfg;
-if (fs.existsSync(SESSION_FILE_PATH)) {
-    sessionCfg = require(SESSION_FILE_PATH);
+const conn = new WAConnection();
+
+conn.on('open', () => {
+    // save credentials whenever updated
+    console.log('credentials updated!');
+    const authInfo = conn.base64EncodedAuthInfo();
+    fs.writeFileSync(SESSION_FILE_PATH, JSON.stringify(authInfo, null, '\t'));
+});
+
+
+if(fs.existsSync(SESSION_FILE_PATH)) {
+    conn.loadAuthInfo(SESSION_FILE_PATH); 
 }
 
-global.client = new Client({
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--unhandled-rejections=strict'
-    ]},
-    session: sessionCfg
-});
+conn.connect().then(() => {
+    conn.on('chat-update', chat => {
+        if(chat.hasNewMessage && chat.count > 0){
+            const message = chat.messages.all()[0];
+            const messageContent = message.message;
 
+            if(messageContent && !message.key.fromMe){
+                const sender = getSenderFromMessageKey(message.key);
+                console.log('sender: ', sender);
 
-client.on('qr', qr => {
-    qrcode.generate(qr, {small: true});
-});
+                if(isValidSender(sender)){
+                    const messageType = Object.keys(messageContent)[0];
 
-client.on('authenticated', (session) => {
-    console.log("AUTH!");
-
-    fs.writeFile(SESSION_FILE_PATH, JSON.stringify(session), function (err) {
-        if (err) {
-            console.error(err);
+                    if (messageType === MessageType.text) {
+                        thereIsNewTextMessage(sender, messageContent.conversation, message);
+                    } else if (messageType === MessageType.extendedText) {
+                        thereIsNewQuoutedTextMessage(sender, messageContent.extendedTextMessage.text, message);
+                    } 
+                }
+            }
         }
     });
+    
 });
 
-client.on('auth_failure', () => {
-    console.log("AUTH Failed!");
-    process.exit()
-});
 
-client.on('ready', () => {
-    console.log('Client is ready!');
-});
+function getSenderFromMessageKey(messageKey){
+    let sender = messageKey.remoteJid;
+    if (messageKey.participant) {
+        sender = messageKey.participant;
+    }
 
-client.initialize();
+    return sender;
+}
+
+function isValidSender(sender){
+    const senderNumber = sender.split('@')[0];
+    return senderNumber == '5492920303450' || senderNumber == '573134168335' || senderNumber == '5492920303450-1628170807';
+}
+
 
 const bot = require('./bot');
-bot.run();
+
+function thereIsNewTextMessage(sender, text, originalMessage){
+    bot.newTextMessage({body: text, reply: resp => {
+        conn.sendMessage(sender, resp, MessageType.text, {quoted: originalMessage});
+    }, replyVideo: video => {
+        if(video){
+            conn.sendMessage(
+                sender, 
+                video, // load a gif and send it
+                MessageType.video, 
+                { mimetype: Mimetype.gif, caption: ":P", quoted: originalMessage }
+            );        
+        } else {
+            conn.sendMessage(sender, "Error al crear el video.", MessageType.text, {quoted: originalMessage});
+        }
+    }});
+}
+
+
+function thereIsNewQuoutedTextMessage(sender, text, originalMessage){
+    bot.newQuotedTextMessage({
+        body: text,
+        quoted: originalMessage.message.extendedTextMessage.contextInfo.quotedMessage.conversation,
+        reply: resp => {
+            conn.sendMessage(sender, resp, MessageType.text);
+    }});
+}
